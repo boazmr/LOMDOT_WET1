@@ -1,3 +1,5 @@
+# Task - copy SoftSVM module
+
 from sklearn.base import BaseEstimator, ClassifierMixin
 import numpy as np
 
@@ -32,6 +34,8 @@ class SoftSVM(BaseEstimator, ClassifierMixin):
 
     @staticmethod
     def loss(w, b: float, C: float, X, y):
+        y = y.values
+        X = X.values
         """
         Compute the SVM objective loss.
 
@@ -42,18 +46,28 @@ class SoftSVM(BaseEstimator, ClassifierMixin):
         :param y: targets for loss computation; array of shape (n_samples,)
         :return: the Soft SVM objective loss (float scalar)
         """
+        # margins = { (w^T)(x_i)+b | x_i in X )
         margins = (X.dot(w) + b).reshape(-1, 1)
+        # hinge_inputs = { (y_i)[(w^T)(x_i)+b] | x_i in X, y_i in y  }
         hinge_inputs = np.multiply(margins, y.reshape(-1, 1))
+        # hinge_losses = max{0, 1-hinge_inputs} ={ max{0, 1 - (y_i)[(w^T)(x_i)+b]} | x_i in X, y_i in y  } }
+        hinge_losses = np.maximum(0, 1-hinge_inputs)
+
+        hinge_losses_sum = np.sum(hinge_losses)
 
         norm = np.linalg.norm(w)
 
-        # TODO: complete the loss calculation
-        loss = 0.0
+        # TODO: complete the loss calculation, and return it
+        loss = norm**2 + C*hinge_losses_sum
+        return loss
 
-        return
+    def f(num):
+         return -1 if num < 1 else 0
 
     @staticmethod
     def subgradient(w, b: float, C: float, X, y):
+        y = y.values
+        X = X.values
         """
         Compute the (analytical) SVM objective sub-gradient.
 
@@ -65,8 +79,25 @@ class SoftSVM(BaseEstimator, ClassifierMixin):
         :return: a tuple with (the gradient of the weights, the gradient of the bias)
         """
         # TODO: calculate the analytical sub-gradient of soft-SVM w.r.t w and b
-        g_w = None
-        g_b = 0.0
+
+        # Calculate common element: f((y_i)[(w^T)(x_i)+b]) * (y_i):
+        # margins = { (w^T)(x_i)+b | x_i in X )
+        margins = (X.dot(w) + b).reshape(-1, 1)
+        # hinge_inputs = { (y_i)[(w^T)(x_i)+b] | x_i in X, y_i in y  }
+        hinge_inputs = np.multiply(margins, y.reshape(-1, 1))
+        # Make the f function vectorwise
+        vectorized_f = np.vectorize(SoftSVM.f)
+        # Apply f to the hinge inputs.
+        # hinge_inputs = { f((y_i)[(w^T)(x_i)+b]) | x_i in X, y_i in y  }
+        hinge_inputs = vectorized_f(hinge_inputs)
+        # Multiply each element by y_i and get the commong elements of the form: f((y_i)[(w^T)(x_i)+b]) * (y_i)
+        common_factors = np.multiply(hinge_inputs, y.reshape(-1, 1))
+
+        # Calculate analytical sub-gradient w.r.t w:
+        g_w = 2*w + C*np.sum(common_factors * X, axis=0)
+
+        # Calculate analytical sub-gradient w.r.t b:
+        g_b = C*np.sum(common_factors, axis=0)
 
         return g_w, g_b
 
@@ -93,7 +124,7 @@ class SoftSVM(BaseEstimator, ClassifierMixin):
         permutation = np.random.permutation(len(y))
         X = X[permutation, :]
         y = y[permutation]
-        
+
         # Iterate over batches
         for iter in range(0, max_iter):
             start_idx = (iter * self.batch_size) % X.shape[0]
@@ -102,12 +133,13 @@ class SoftSVM(BaseEstimator, ClassifierMixin):
             batch_y = y[start_idx:end_idx]
 
             # TODO: Compute the (sub)gradient of the current *batch*
-            g_w, g_b = None, None
+
+            g_w, g_b = self.subgradient(self.w, self.b, self.C, batch_X, batch_y)
 
             # Perform a (sub)gradient step
             # TODO: update the learned parameters correctly
-            self.w = None
-            self.b = 0.0
+            self.w = self.w - self.lr*g_w
+            self.b = self.b - self.lr*g_b
 
             if keep_losses:
                 losses.append(self.loss(self.w, self.b, self.C, X, y))
@@ -137,6 +169,8 @@ class SoftSVM(BaseEstimator, ClassifierMixin):
                  NOTE: the labels must be either +1 or -1
         """
         # TODO: compute the predicted labels (+1 or -1)
-        y_pred = None
-
+        # Take each x in X and set it's y value as: sign((w^T)x + b)
+        y_pred = np.sign(X.dot(self.w) + self.b)
+        # Little problem: if x==0 then np.sign(x)==0. We want x==0  ->  y==1.
+        y_pred[y_pred == 0] = 1
         return y_pred
